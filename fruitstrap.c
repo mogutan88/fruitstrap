@@ -533,7 +533,7 @@ void usage(const char* app) {
     printf ("Commands available:\n");
     printf ("   install    [-i/--id device_id] -b/--bundle bundle.app [-a/--args arguments] \n");
     printf ("    * Install the specified app with optional arguments to the specified device, or all attached devices if none are specified. \n\n");
-    printf ("   uninstall  [-i/--id device_id] -b/--bundle bundle.app \n");
+    printf ("   uninstall  [-i/--id device_id] -b/--bundle bundle.app.id \n");
     printf ("    * Removed the specified bundle identifier (eg com.foo.MyApp) from the specified device, or all attached devices if none are specified. \n\n");
     printf ("   list-devices  \n");
     printf ("    * List all attached devices. \n\n");

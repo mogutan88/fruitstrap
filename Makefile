@@ -16,7 +16,10 @@ fruitstrap: fruitstrap.c
 	$(IOS_CC) -g -o fruitstrap -framework Foundation -framework CoreFoundation -framework MobileDevice -F/System/Library/PrivateFrameworks fruitstrap.c
 
 install: all
-	./fruitstrap demo.app
+	./fruitstrap install --bundle demo.app
+
+uninstall: all
+	./fruitstrap uninstall --bundle demo.app
 
 debug: all
 	./fruitstrap -d demo.app

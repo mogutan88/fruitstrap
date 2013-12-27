@@ -38,6 +38,15 @@
     sharedlibrary apply-load-rules all\n\
     set inferior-auto-start-dyld 1")
 
+typedef enum {
+    OP_NONE,
+
+    OP_INSTALL,
+    OP_UNINSTALL,
+    OP_LIST_DEVICES
+
+} operation_t;
+
 typedef struct am_device * AMDeviceRef;
 int AMDeviceSecureTransferPath(int zero, AMDeviceRef device, CFURLRef url, CFDictionaryRef options, void *callback, int cbarg);
 int AMDeviceSecureInstallApplication(int zero, AMDeviceRef device, CFURLRef url, CFDictionaryRef options, void *callback, int cbarg);
@@ -49,6 +58,7 @@ char *app_path = NULL;
 char *device_id = NULL;
 char *args = NULL;
 int timeout = 0;
+operation_t operation = OP_INSTALL;
 CFStringRef last_path = NULL;
 service_conn_t gdbfd;
 
@@ -224,7 +234,7 @@ void transfer_callback(CFDictionaryRef dict, int arg) {
     }
 }
 
-void install_callback(CFDictionaryRef dict, int arg) {
+void operation_callback(CFDictionaryRef dict, int arg) {
     int percent;
     CFStringRef status = CFDictionaryGetValue(dict, CFSTR("Status"));
     CFNumberGetValue(CFDictionaryGetValue(dict, CFSTR("PercentComplete")), kCFNumberSInt32Type, &percent);
@@ -380,7 +390,7 @@ void start_remote_debug_server(AMDeviceRef device) {
 
 void gdb_ready_handler(int signum)
 {
-	_exit(0);
+        _exit(0);
 }
 
 void handle_device(AMDeviceRef device) {
@@ -388,6 +398,7 @@ void handle_device(AMDeviceRef device) {
 
     CFStringRef found_device_id = AMDeviceCopyDeviceIdentifier(device);
 
+    printf ("found device id\n");
     if (device_id != NULL) {
         if(strcmp(device_id, CFStringGetCStringPtr(found_device_id, CFStringGetSystemEncoding())) == 0) {
             found_device = true;
@@ -395,6 +406,11 @@ void handle_device(AMDeviceRef device) {
             return;
         }
     } else {
+        if (operation == OP_LIST_DEVICES) {
+            printf ("%s\n", CFStringGetCStringPtr(found_device_id, CFStringGetSystemEncoding()));
+            CFRetain(device); // don't know if this is necessary?
+            return;
+        }
         found_device = true;
     }
 
@@ -417,9 +433,11 @@ void handle_device(AMDeviceRef device) {
     assert(AMDeviceStartService(device, CFSTR("com.apple.afc"), &afcFd, NULL) == 0);
     assert(AMDeviceStopSession(device) == 0);
     assert(AMDeviceDisconnect(device) == 0);
-    assert(AMDeviceTransferApplication(afcFd, path, NULL, transfer_callback, NULL) == 0);
 
-    close(afcFd);
+    if (operation == OP_INSTALL) {
+        assert(AMDeviceTransferApplication(afcFd, path, NULL, transfer_callback, NULL) == 0);
+        close(afcFd);
+    }
 
     CFStringRef keys[] = { CFSTR("PackageType") };
     CFStringRef values[] = { CFSTR("Developer") };
@@ -436,19 +454,34 @@ void handle_device(AMDeviceRef device) {
     assert(AMDeviceStopSession(device) == 0);
     assert(AMDeviceDisconnect(device) == 0);
 
-    mach_error_t result = AMDeviceInstallApplication(installFd, path, options, install_callback, NULL);
-    if (result != 0)
-    {
-       printf("AMDeviceInstallApplication failed: %d\n", result);
-        exit(1);
+    if (operation == OP_INSTALL) {
+        
+        mach_error_t result = AMDeviceInstallApplication(installFd, path, options, operation_callback, NULL);
+        if (result != 0)
+        {
+           printf("AMDeviceInstallApplication failed: %d\n", result);
+            exit(1);
+        }
+    } else if (operation == OP_UNINSTALL) {
+        mach_error_t result = AMDeviceUninstallApplication (installFd, path, NULL, operation_callback, NULL);
+        if (result != 0)
+        {
+           printf("AMDeviceUninstallApplication failed: %d\n", result);
+            exit(1);
+        }
     }
+
 
     close(installFd);
 
     CFRelease(path);
     CFRelease(options);
 
-    printf("[100%%] Installed package %s\n", app_path);
+    if (operation == OP_INSTALL)
+        printf("[100%%] Installed package %s\n", app_path);
+    else if (operation == OP_UNINSTALL)
+        printf("[100%%] uninstalled package %s\n", app_path);
+
 
     if (!debug) exit(0); // no debug phase
 
@@ -496,29 +529,42 @@ void timeout_callback(CFRunLoopTimerRef timer, void *info) {
 }
 
 void usage(const char* app) {
-    printf("usage: %s [-d/--debug] [-i/--id device_id] -b/--bundle bundle.app [-a/--args arguments] [-t/--timeout timeout(seconds)]\n", app);
+    printf ("usage: %s [-t/--timeout timeout(seconds)] [-v/--verbose] <command> [<args>] \n\n", app);
+    printf ("Commands available:\n");
+    printf ("   install    [-i/--id device_id] -b/--bundle bundle.app [-a/--args arguments] \n");
+    printf ("    * Install the specified app with optional arguments to the specified device, or all attached devices if none are specified. \n\n");
+    printf ("   uninstall  [-i/--id device_id] -b/--bundle bundle.app \n");
+    printf ("    * Removed the specified bundle identifier (eg com.foo.MyApp) from the specified device, or all attached devices if none are specified. \n\n");
+    printf ("   list-devices  \n");
+    printf ("    * List all attached devices. \n\n");
 }
 
 int main(int argc, char *argv[]) {
-    static struct option longopts[] = {
-        { "debug", no_argument, NULL, 'd' },
-        { "id", required_argument, NULL, 'i' },
-        { "bundle", required_argument, NULL, 'b' },
-        { "args", required_argument, NULL, 'a' },
+    static struct option global_longopts[]= {
         { "verbose", no_argument, NULL, 'v' },
         { "timeout", required_argument, NULL, 't' },
+        
+        { "id", required_argument, NULL, 'i' },
+        { "bundle", required_argument, NULL, 'b' },
+   
+        { "debug", no_argument, NULL, 'd' },
+        { "args", required_argument, NULL, 'a' },
+
         { NULL, 0, NULL, 0 },
     };
-    char ch;
 
-    while ((ch = getopt_long(argc, argv, "dvi:b:a:t:", longopts, NULL)) != -1)
+    char ch;
+    while ((ch = getopt_long(argc, argv, "vdt:", global_longopts, NULL)) != -1)
     {
         switch (ch) {
+        case 'v':
+            verbose = 1;
+            break;
         case 'd':
             debug = 1;
             break;
-        case 'i':
-            device_id = optarg;
+        case 't':
+            timeout = atoi(optarg);
             break;
         case 'b':
             app_path = optarg;
@@ -526,26 +572,36 @@ int main(int argc, char *argv[]) {
         case 'a':
             args = optarg;
             break;
-        case 'v':
-            verbose = 1;
-            break;
-        case 't':
-            timeout = atoi(optarg);
-            break;
         default:
             usage(argv[0]);
             return 1;
         }
     }
+    
+    if (optind >= argc) {
+        usage(argv [0]);
+        exit (0);
+    }
 
-    if (!app_path) {
+    operation = OP_NONE;
+    if (strcmp (argv [optind], "install") == 0) {
+        operation = OP_INSTALL;
+    } else if (strcmp (argv [optind], "uninstall") == 0) {
+        operation = OP_UNINSTALL;
+    } else if (strcmp (argv [optind], "list-devices") == 0) {
+        operation = OP_LIST_DEVICES;
+    } else {
+        usage (argv [0]);
+        exit (0);
+    }
+
+    if (operation != OP_LIST_DEVICES && !app_path) {
         usage(argv[0]);
         exit(0);
     }
 
-    printf("------ Install phase ------\n");
-
-    assert(access(app_path, F_OK) == 0);
+    if (operation == OP_INSTALL)
+        assert(access(app_path, F_OK) == 0);
 
     AMDSetLogLevel(5); // otherwise syslog gets flooded with crap
     if (timeout > 0)

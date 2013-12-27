@@ -19,7 +19,7 @@ install: all
 	./fruitstrap install --bundle demo.app
 
 uninstall: all
-	./fruitstrap uninstall --bundle demo.app
+	./fruitstrap uninstall --bundle demo.app.id
 
 debug: all
 	./fruitstrap -d demo.app

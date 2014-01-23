@@ -560,6 +560,9 @@ int main(int argc, char *argv[]) {
         case 'v':
             verbose = 1;
             break;
+        case 'i':
+            device_id = optarg;
+            break;
         case 'd':
             debug = 1;
             break;

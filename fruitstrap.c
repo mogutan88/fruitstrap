@@ -400,14 +400,14 @@ void handle_device(AMDeviceRef device) {
 
     printf ("found device id\n");
     if (device_id != NULL) {
-        if(strcmp(device_id, CFStringGetCStringPtr(found_device_id, CFStringGetSystemEncoding())) == 0) {
+        if(strcmp(device_id, CFStringGetCStringPtr(found_device_id, CFStringGetFastestEncoding(found_device_id))) == 0){
             found_device = true;
         } else {
             return;
         }
     } else {
         if (operation == OP_LIST_DEVICES) {
-            printf ("%s\n", CFStringGetCStringPtr(found_device_id, CFStringGetSystemEncoding()));
+            printf ("%s\n", CFStringGetCStringPtr(found_device_id, CFStringGetFastestEncoding(found_device_id)));
             CFRetain(device); // don't know if this is necessary?
             return;
         }
